@@ -1,0 +1,160 @@
+name: "1.0"
+pool:
+  vmImage: ubuntu-latest
+trigger:
+  branches:
+    include:
+      - main
+      - poc
+  paths:
+    include:
+      - rg-poc-omint1/*
+      - rg-poc-omint2/*
+variables:
+  - group: Azure-credentials-Ttech
+
+stages:
+  - stage: validate
+    displayName: Terraform Validate
+    jobs:
+      - job: validate
+        displayName: Terraform Validate
+        steps:
+          - checkout: self
+            path: ./rg-poc-omint2/
+          - script: |
+              terraform init
+              terraform validate
+            displayName: Terraform Init
+            env:
+              ARM_CLIENT_ID: $(ARM_CLIENT_ID)
+              ARM_CLIENT_SECRET: $(ARM_CLIENT_SECRET)
+              ARM_SUBSCRIPTION_ID: $(ARM_SUBSCRIPTION_ID)
+              ARM_TENANT_ID: $(ARM_TENANT_ID)
+  - stage: plan
+    displayName: Terraform Plan
+    jobs:
+      - job: plan
+        displayName: Terraform Plan
+        steps:
+          - checkout: self
+            path: ./rg-poc-omint2/
+          - task: DownloadSecureFile@1
+            name: azure_pub_key
+            displayName: Download AZURE public key
+            inputs:
+              secureFile: uansible.pub
+          - script: |
+              terraform init
+              terraform plan -out=plan.out
+            displayName: Terraform Init
+            env:
+              ARM_CLIENT_ID: $(ARM_CLIENT_ID)
+              ARM_CLIENT_SECRET: $(ARM_CLIENT_SECRET)
+              ARM_SUBSCRIPTION_ID: $(ARM_SUBSCRIPTION_ID)
+              ARM_TENANT_ID: $(ARM_TENANT_ID)
+              TF_VAR_aws_pub_key: $(aws_pub_key.securefilePath)
+              TF_VAR_azure_pub_key: $(azure_pub_key.securefilePath)
+          - publish: $(Build.SourcesDirectory)/plan.out
+            artifact: plan
+            displayName: Publish Plan
+  - stage: approve_apply
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    displayName: Approve Apply
+    jobs:
+      - job: approve_apply
+        pool: server
+        displayName: Approve Apply
+        steps:
+          - task: ManualValidation@0
+            timeoutInMinutes: 10
+            inputs:
+              notifyUsers: aloysio.filho@telefonica.com
+
+  - stage: apply
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    displayName: Terraform Apply
+    jobs:
+      - job: apply
+        displayName: Terraform Apply
+        steps:
+          - task: DownloadSecureFile@1
+            name: azure_pub_key
+            displayName: Download AZURE public key
+            inputs:
+              secureFile: uansible.pub
+          - download: current
+            artifact: plan
+            displayName: Download Plan
+          - script:
+              terraform init
+            displayName: Terraform Init
+            env:
+              ARM_CLIENT_ID: $(ARM_CLIENT_ID)
+              ARM_CLIENT_SECRET: $(ARM_CLIENT_SECRET)
+              ARM_SUBSCRIPTION_ID: $(ARM_SUBSCRIPTION_ID)
+              ARM_TENANT_ID: $(ARM_TENANT_ID)
+              TF_VAR_aws_pub_key: $(aws_pub_key.securefilePath)
+              TF_VAR_azure_pub_key: $(azure_pub_key.securefilePath)
+
+          - script:
+              terraform apply $(Pipeline.Workspace)/plan/plan.out
+            displayName: Terraform Apply
+            env:
+              ARM_CLIENT_ID: $(ARM_CLIENT_ID)
+              ARM_CLIENT_SECRET: $(ARM_CLIENT_SECRET)
+              ARM_SUBSCRIPTION_ID: $(ARM_SUBSCRIPTION_ID)
+              ARM_TENANT_ID: $(ARM_TENANT_ID)
+              TF_VAR_aws_pub_key: $(aws_pub_key.securefilePath)
+              TF_VAR_azure_pub_key: $(azure_pub_key.securefilePath)
+
+  # - stage: approve_destroy
+  #   displayName: Approve Destroy
+  #   jobs:
+  #     - job: approve_destroy
+  #       pool: server
+  #       displayName: Approve Destroy
+  #       steps:
+  #         - task: ManualValidation@0
+  #           timeoutInMinutes: 10
+
+  # - stage: destroy
+  #   displayName: Terraform Destroy
+  #   jobs:
+  #     - job: destroy
+  #       displayName: Terraform Destroy
+  #       steps:
+  #         - task: DownloadSecureFile@1
+  #           name: aws_pub_key
+  #           displayName: Download AWS public key
+  #           inputs:
+  #             secureFile: aws-key.pub
+  #         - task: DownloadSecureFile@1
+  #           name: azure_pub_key
+  #           displayName: Download AZURE public key
+  #           inputs:
+  #             secureFile: azure-key.pub
+  #         - script:
+  #             terraform init
+  #           displayName: Terraform Init
+  #           env:
+  #             AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+  #             AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+  #             ARM_CLIENT_ID: $(ARM_CLIENT_ID)
+  #             ARM_CLIENT_SECRET: $(ARM_CLIENT_SECRET)
+  #             ARM_SUBSCRIPTION_ID: $(ARM_SUBSCRIPTION_ID)
+  #             ARM_TENANT_ID: $(ARM_TENANT_ID)
+  #             TF_VAR_aws_pub_key: $(aws_pub_key.securefilePath)
+  #             TF_VAR_azure_pub_key: $(azure_pub_key.securefilePath)
+  #         - script:
+  #             terraform destroy -auto-approve
+  #           displayName: Terraform Destroy
+  #           env:
+  #             AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+  #             AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+  #             ARM_CLIENT_ID: $(ARM_CLIENT_ID)
+  #             ARM_CLIENT_SECRET: $(ARM_CLIENT_SECRET)
+  #             ARM_SUBSCRIPTION_ID: $(ARM_SUBSCRIPTION_ID)
+  #             ARM_TENANT_ID: $(ARM_TENANT_ID)
+  #             TF_VAR_aws_pub_key: $(aws_pub_key.securefilePath)
+  #             TF_VAR_azure_pub_key: $(azure_pub_key.securefilePath)
